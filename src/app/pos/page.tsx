@@ -193,13 +193,11 @@ export default function StandalonePOSPage() {
       } as any);
 
       const orderPayload = {
-        customer_name: customerName.trim() || 'Venta Presencial',
+        customer_name: (customerName.trim() || 'Venta Presencial') + ` [POS-${methodLabel}]`,
         branch_name: activeBranch,
         items: orderItems,
         total: cartTotal,
         status: 'delivered',
-        notes: `[POS] Pago: ${methodLabel}`,
-        created_at: new Date().toISOString(),
       };
 
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
@@ -233,13 +231,13 @@ export default function StandalonePOSPage() {
       .select('*')
       .eq('branch_name', activeBranch)
       .gte('created_at', todayStart.toISOString())
-      .ilike('notes', '%[POS]%')
+      .ilike('customer_name', '%[POS-%')
       .order('created_at', { ascending: false });
 
     if (data) {
-      const cashSales = data.filter((o: any) => o.notes?.includes('Efectivo'));
-      const cardSales = data.filter((o: any) => o.notes?.includes('Tarjeta'));
-      const otherSales = data.filter((o: any) => o.notes?.includes('Otro'));
+      const cashSales = data.filter((o: any) => o.customer_name?.includes('[POS-Efectivo]'));
+      const cardSales = data.filter((o: any) => o.customer_name?.includes('[POS-Tarjeta]'));
+      const otherSales = data.filter((o: any) => o.customer_name?.includes('[POS-Otro]'));
       setShiftData({
         total: data.reduce((s: number, o: any) => s + (o.total || 0), 0),
         count: data.length,
@@ -261,7 +259,7 @@ export default function StandalonePOSPage() {
       .select('*')
       .eq('branch_name', activeBranch)
       .gte('created_at', todayStart.toISOString())
-      .ilike('notes', '%[POS]%')
+      .ilike('customer_name', '%[POS-%')
       .order('created_at', { ascending: false });
 
     if (data) setReceipts(data);
@@ -533,7 +531,7 @@ export default function StandalonePOSPage() {
           <div className="space-y-3">
             {receipts.map((order: any) => {
               const items = (order.items || []).filter((i: any) => i.id !== '_payment');
-              const payMethod = order.notes?.includes('Efectivo') ? '💵 Efectivo' : order.notes?.includes('Tarjeta') ? '💳 Tarjeta' : '💰 Otro';
+              const payMethod = order.customer_name?.includes('[POS-Efectivo]') ? '💵 Efectivo' : order.customer_name?.includes('[POS-Tarjeta]') ? '💳 Tarjeta' : '💰 Otro';
               const time = new Date(order.created_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
 
               return (
