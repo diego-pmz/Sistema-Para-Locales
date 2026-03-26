@@ -192,8 +192,6 @@ export default function StandalonePOSPage() {
         isPaidOnline: method === 'card',
       } as any);
 
-      const maxPrepTime = Math.max(...cart.map((i) => i.product.prepTime || 0), 5);
-
       const orderPayload = {
         customer_name: customerName.trim() || 'Venta Presencial',
         branch_name: activeBranch,
@@ -201,7 +199,6 @@ export default function StandalonePOSPage() {
         total: cartTotal,
         status: 'delivered',
         notes: `[POS] Pago: ${methodLabel}`,
-        estimated_wait_time: maxPrepTime,
         created_at: new Date().toISOString(),
       };
 
