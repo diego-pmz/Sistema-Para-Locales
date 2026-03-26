@@ -57,6 +57,12 @@ export default function StandalonePOSPage() {
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
 
+  // POS Layout customization (stored in localStorage)
+  // hiddenProducts: Set of product IDs hidden from sales grid
+  // productOrder: Record<categoryId, productId[]> for custom ordering
+  const [hiddenProducts, setHiddenProducts] = useState<Set<string>>(new Set());
+  const [productOrder, setProductOrder] = useState<Record<string, string[]>>({});
+
   // Payment modal
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -81,10 +87,16 @@ export default function StandalonePOSPage() {
   // Branch menu
   const [showBranchMenu, setShowBranchMenu] = useState(false);
 
-  // Load parked tickets from localStorage
+  // Load parked tickets + POS layout from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('pos-parked-tickets');
     if (saved) setParkedTickets(JSON.parse(saved));
+    const layout = localStorage.getItem('pos-layout');
+    if (layout) {
+      const parsed = JSON.parse(layout);
+      setHiddenProducts(new Set(parsed.hidden || []));
+      setProductOrder(parsed.order || {});
+    }
   }, []);
 
   // Save parked tickets to localStorage
@@ -99,11 +111,54 @@ export default function StandalonePOSPage() {
 
   const cartTotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const getProductCount = (catId: string) => products.filter((p) => p.categoryId === catId && p.isAvailable).length;
+  const getProductCount = (catId: string) => getOrderedProducts(catId).filter((p) => !hiddenProducts.has(p.id)).length;
+
+  // Get products for a category, respecting custom order
+  const getOrderedProducts = (catId: string) => {
+    const catProducts = products.filter((p) => p.categoryId === catId && p.isAvailable);
+    const order = productOrder[catId];
+    if (!order) return catProducts;
+    const ordered: Product[] = [];
+    for (const id of order) {
+      const p = catProducts.find((x) => x.id === id);
+      if (p) ordered.push(p);
+    }
+    // Add any products not in the custom order (new products)
+    for (const p of catProducts) {
+      if (!order.includes(p.id)) ordered.push(p);
+    }
+    return ordered;
+  };
 
   const filteredProducts = selectedCategory
-    ? products.filter((p) => p.categoryId === selectedCategory && p.isAvailable)
+    ? getOrderedProducts(selectedCategory).filter((p) => !hiddenProducts.has(p.id))
     : [];
+
+  // Save POS layout to localStorage
+  const savePOSLayout = (hidden: Set<string>, order: Record<string, string[]>) => {
+    setHiddenProducts(hidden);
+    setProductOrder(order);
+    localStorage.setItem('pos-layout', JSON.stringify({ hidden: Array.from(hidden), order }));
+  };
+
+  const toggleProductVisibility = (productId: string) => {
+    const newHidden = new Set(hiddenProducts);
+    if (newHidden.has(productId)) newHidden.delete(productId);
+    else newHidden.add(productId);
+    savePOSLayout(newHidden, productOrder);
+  };
+
+  const moveProduct = (catId: string, productId: string, direction: 'up' | 'down') => {
+    const catProducts = products.filter((p) => p.categoryId === catId && p.isAvailable);
+    const currentOrder = productOrder[catId] || catProducts.map((p) => p.id);
+    const idx = currentOrder.indexOf(productId);
+    if (idx === -1) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= currentOrder.length) return;
+    const newOrder = [...currentOrder];
+    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
+    savePOSLayout(hiddenProducts, { ...productOrder, [catId]: newOrder });
+  };
 
   // ─── CART OPERATIONS ───────────────────────────────────
   const addToCart = useCallback((product: Product) => {
@@ -430,38 +485,70 @@ export default function StandalonePOSPage() {
     </div>
   );
 
-  const renderProductsView = () => (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-3xl mx-auto">
-        <h2 className="text-2xl font-black text-gray-900 mb-2">📦 Gestión de Productos</h2>
-        <p className="text-gray-500 text-sm mb-6">Activa o desactiva productos que aparecen en la pantalla de ventas.</p>
+  const renderProductsView = () => {
+    const resetLayout = () => {
+      savePOSLayout(new Set(), {});
+    };
 
-        {categories.map((cat) => {
-          const catProducts = products.filter((p) => p.categoryId === cat.id);
-          return (
-            <div key={cat.id} className="mb-6">
-              <h3 className="text-sm font-black uppercase text-gray-400 tracking-widest mb-2 flex items-center gap-2">
-                <span>{catEmoji[cat.id] || '📦'}</span> {cat.name} ({catProducts.length})
-              </h3>
-              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm divide-y divide-gray-50">
-                {catProducts.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-gray-800 text-sm truncate">{p.name}</p>
-                      <p className="text-xs text-gray-400">{formatPrice(p.price)}</p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black ${p.isAvailable ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                      {p.isAvailable ? 'Activo' : 'Inactivo'}
-                    </span>
-                  </div>
-                ))}
+    return (
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-2xl font-black text-gray-900">📦 Gestión de Productos</h2>
+            <button onClick={resetLayout} className="text-xs font-bold text-gray-400 hover:text-red-500 bg-gray-100 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+              Resetear Layout
+            </button>
+          </div>
+          <p className="text-gray-500 text-sm mb-6">Activa/desactiva productos y reorganiza el orden con las flechas. Los cambios se guardan automáticamente en este dispositivo.</p>
+
+          {categories.map((cat) => {
+            const orderedProducts = getOrderedProducts(cat.id);
+            const visibleCount = orderedProducts.filter((p) => !hiddenProducts.has(p.id)).length;
+            return (
+              <div key={cat.id} className="mb-6">
+                <h3 className="text-sm font-black uppercase text-gray-400 tracking-widest mb-2 flex items-center gap-2">
+                  <span>{catEmoji[cat.id] || '📦'}</span> {cat.name}
+                  <span className="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{visibleCount}/{orderedProducts.length}</span>
+                </h3>
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm divide-y divide-gray-50">
+                  {orderedProducts.map((p, idx) => {
+                    const isHidden = hiddenProducts.has(p.id);
+                    return (
+                      <div key={p.id} className={`flex items-center gap-3 px-4 py-3 transition-colors ${isHidden ? 'opacity-40 bg-gray-50' : ''}`}>
+                        {/* Move arrows */}
+                        <div className="flex flex-col gap-0.5 shrink-0">
+                          <button onClick={() => moveProduct(cat.id, p.id, 'up')} disabled={idx === 0}
+                            className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors active:scale-90">
+                            <ChevronDown size={14} className="rotate-180" />
+                          </button>
+                          <button onClick={() => moveProduct(cat.id, p.id, 'down')} disabled={idx === orderedProducts.length - 1}
+                            className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors active:scale-90">
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+
+                        {/* Product info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-800 text-sm truncate">{p.name}</p>
+                          <p className="text-xs text-gray-400">{formatPrice(p.price)}</p>
+                        </div>
+
+                        {/* Toggle switch */}
+                        <button onClick={() => toggleProductVisibility(p.id)}
+                          className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${isHidden ? 'bg-gray-300' : 'bg-green-500'}`}>
+                          <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-all ${isHidden ? 'left-0.5' : 'left-[22px]'}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderSettingsView = () => {
     const renderPrinterCard = (role: PrinterRole, title: string, Icon: any, state: PrinterState) => (
