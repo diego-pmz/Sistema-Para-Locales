@@ -20,22 +20,31 @@ const BRANCHES = ['Pucón', 'Villarrica', 'Temuco', 'Panguipulli'];
 
 export default function StandalonePOSPage() {
   const [activeBranch, setActiveBranch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState(categories[0]?.id || '');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [processing, setProcessing] = useState(false);
   const [lastSaleTotal, setLastSaleTotal] = useState<number | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [showBranchMenu, setShowBranchMenu] = useState(false);
 
-  const filteredProducts = products.filter(
-    (p) => p.categoryId === selectedCategory && p.isAvailable
-  );
+  const filteredProducts = selectedCategory
+    ? products.filter((p) => p.categoryId === selectedCategory && p.isAvailable)
+    : [];
 
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(price);
 
   const cartTotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Get product count per category for badges
+  const getProductCount = (catId: string) => products.filter((p) => p.categoryId === catId && p.isAvailable).length;
+
+  // Category emoji map
+  const catEmoji: Record<string, string> = {
+    'c1': '🍱', 'c2': '🍟', 'c3': '🍣', 'c4': '🔥', 
+    'c5': '👑', 'c6': '🥢', 'c7': '🏆', 'c8': '🥤',
+  };
 
   // --- CART OPERATIONS ---
   const addToCart = useCallback((product: Product) => {
@@ -201,21 +210,25 @@ export default function StandalonePOSPage() {
             )}
           </div>
 
-          {/* Category Tabs */}
-          <div className="flex-1 flex gap-2 overflow-x-auto pl-2">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${
-                  selectedCategory === cat.id
-                    ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/30'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
+          {/* Breadcrumb / Title */}
+          <div className="flex-1 flex items-center gap-2">
+            {selectedCategory ? (
+              <>
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="flex items-center gap-1.5 text-gray-400 hover:text-pink-500 font-bold text-sm transition-colors"
+                >
+                  <ArrowLeft size={16} />
+                  Categorías
+                </button>
+                <span className="text-gray-300">/</span>
+                <span className="font-black text-gray-900 text-sm">
+                  {categories.find((c) => c.id === selectedCategory)?.name}
+                </span>
+              </>
+            ) : (
+              <span className="font-black text-gray-900 text-sm">Selecciona una categoría</span>
+            )}
           </div>
 
           {/* Printer indicator */}
@@ -235,44 +248,73 @@ export default function StandalonePOSPage() {
           </Link>
         </div>
 
-        {/* PRODUCT GRID */}
-        <div className="flex-1 overflow-y-auto p-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-            {filteredProducts.map((product) => {
-              const inCart = cart.find((i) => i.product.id === product.id);
-              return (
-                <button
-                  key={product.id}
-                  onClick={() => addToCart(product)}
-                  className={`relative flex flex-col bg-white rounded-2xl border-2 p-3.5 text-left transition-all active:scale-[0.96] shadow-sm hover:shadow-md ${
-                    inCart
-                      ? 'border-pink-400 ring-2 ring-pink-100'
-                      : 'border-gray-100 hover:border-gray-200'
-                  }`}
-                >
-                  {inCart && (
-                    <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg z-10">
-                      {inCart.quantity}
+        {/* ============================================ */}
+        {/* MAIN CONTENT: CATEGORIES or PRODUCTS */}
+        {/* ============================================ */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {!selectedCategory ? (
+            /* ---- CATEGORY GRID ---- */
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {categories.map((cat) => {
+                const count = getProductCount(cat.id);
+                const emoji = catEmoji[cat.id] || '📦';
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className="flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-gray-100 hover:border-pink-300 p-6 md:p-8 text-center transition-all active:scale-[0.95] shadow-sm hover:shadow-xl hover:shadow-pink-500/10 group"
+                  >
+                    <span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{emoji}</span>
+                    <h3 className="font-black text-gray-900 text-base md:text-lg leading-tight mb-1">
+                      {cat.name}
+                    </h3>
+                    <span className="text-xs font-bold text-gray-400">
+                      {count} {count === 1 ? 'producto' : 'productos'}
                     </span>
-                  )}
-                  <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">
-                    {product.name}
-                  </h3>
-                  <span className="font-black text-pink-600 text-base mt-auto">
-                    {formatPrice(product.price)}
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            /* ---- PRODUCT GRID ---- */
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
+              {filteredProducts.map((product) => {
+                const inCart = cart.find((i) => i.product.id === product.id);
+                return (
+                  <button
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className={`relative flex flex-col bg-white rounded-2xl border-2 p-3.5 text-left transition-all active:scale-[0.96] shadow-sm hover:shadow-md ${
+                      inCart
+                        ? 'border-pink-400 ring-2 ring-pink-100'
+                        : 'border-gray-100 hover:border-gray-200'
+                    }`}
+                  >
+                    {inCart && (
+                      <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg z-10">
+                        {inCart.quantity}
+                      </span>
+                    )}
+                    <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">
+                      {product.name}
+                    </h3>
+                    <span className="font-black text-pink-600 text-base mt-auto">
+                      {formatPrice(product.price)}
+                    </span>
+                  </button>
+                );
+              })}
 
-            {filteredProducts.length === 0 && (
-              <div className="col-span-full text-center py-16 text-gray-400">
-                <p className="font-bold text-lg">No hay productos en esta categoría</p>
-              </div>
-            )}
-          </div>
+              {filteredProducts.length === 0 && (
+                <div className="col-span-full text-center py-16 text-gray-400">
+                  <p className="font-bold text-lg">No hay productos en esta categoría</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
 
       {/* ============================================ */}
       {/* RIGHT: TICKET / CART SIDEBAR */}
