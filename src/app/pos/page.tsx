@@ -76,6 +76,7 @@ export default function StandalonePOSPage() {
   // Multi-ticket system
   const [parkedTickets, setParkedTickets] = useState<ParkedTicket[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const [ticketSidebarView, setTicketSidebarView] = useState<'active' | 'saved'>('active');
   const [parkModalOpen, setParkModalOpen] = useState(false);
   const [parkName, setParkName] = useState('');
   const [parkComment, setParkComment] = useState('');
@@ -292,6 +293,23 @@ export default function StandalonePOSPage() {
     setParkModalOpen(false);
     setParkName('');
     setParkComment('');
+
+    // Auto-print kitchen comanda on save
+    try {
+      if (ESCPOSPrinter.isConnected('kitchen')) {
+        const orderToPrint = {
+          id: ticket.id,
+          customer_name: ticket.customerName,
+          items: ticket.items.map(i => ({ ...i.product, quantity: i.quantity })),
+          total: ticket.total,
+          created_at: new Date().toISOString(),
+          branch_name: activeBranch
+        };
+        ESCPOSPrinter.printOrder(orderToPrint, 'kitchen');
+      }
+    } catch (err) {
+      console.error('Error auto-printing kitchen comanda:', err);
+    }
   };
 
   // Open (expand) a saved ticket
@@ -308,6 +326,7 @@ export default function StandalonePOSPage() {
     setActiveTicketId(ticketId);
     setCart(ticket.items);
     setCustomerName(ticket.customerName === 'Sin nombre' ? '' : ticket.customerName);
+    setTicketSidebarView('active');
   };
 
   // Start a new empty ticket (deselect active)
@@ -315,6 +334,7 @@ export default function StandalonePOSPage() {
     setActiveTicketId(null);
     setCart([]);
     setCustomerName('');
+    setTicketSidebarView('active');
   };
 
   const deleteParkedTicket = (ticketId: string) => {
@@ -357,10 +377,10 @@ export default function StandalonePOSPage() {
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
       if (error) throw error;
 
-      // Auto-print
+      // Auto-print after payment
       if (data) {
         try { if (ESCPOSPrinter.isConnected('kitchen')) await ESCPOSPrinter.printOrder(data, 'kitchen'); } catch {}
-        try { if (ESCPOSPrinter.isConnected('cashier')) await ESCPOSPrinter.printOrder(data, 'cashier'); } catch {}
+        try { if (ESCPOSPrinter.isConnected('cashier')) await ESCPOSPrinter.printOrder(data, 'cashier', true); } catch {}
       }
 
       setLastSaleTotal(cartTotal);
@@ -992,85 +1012,210 @@ export default function StandalonePOSPage() {
           )}
         </div>
 
-        {/* TICKET TABS STRIP */}
-        {parkedTickets.length > 0 && (
-          <div className="px-2 py-2 border-b border-gray-100 shrink-0 overflow-x-auto">
-            <div className="flex gap-1.5 items-center">
-              {/* New ticket tab */}
-              <button onClick={startNewTicket}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 shrink-0 ${
-                  !activeTicketId ? 'bg-pink-500 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}>
-                <Plus size={12} /> Nuevo
-              </button>
-
-              {/* Saved ticket tabs */}
-              {parkedTickets.map((t) => (
-                <button key={t.id} onClick={() => openTicket(t.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 shrink-0 group ${
-                    activeTicketId === t.id
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-600 hover:bg-amber-50 hover:text-amber-700'
-                  }`}>
-                  <span className="truncate max-w-[80px]">{t.customerName}</span>
-                  <span className={`text-[10px] font-black ${activeTicketId === t.id ? 'text-amber-100' : 'text-gray-400'}`}>{formatPrice(t.total)}</span>
-                  <button onClick={(e) => { e.stopPropagation(); deleteParkedTicket(t.id); }}
-                    className={`ml-0.5 rounded-full w-4 h-4 flex items-center justify-center transition-colors ${
-                      activeTicketId === t.id ? 'text-amber-200 hover:text-white hover:bg-amber-600' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
-                    }`}>
-                    <X size={10} />
-                  </button>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Customer Name */}
-        <div className="px-4 py-2 border-b border-gray-50 shrink-0">
-          <input type="text" placeholder="Nombre del cliente (opcional)" value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent" />
-          {/* Show comment for active ticket */}
-          {activeTicketId && (() => {
-            const t = parkedTickets.find(x => x.id === activeTicketId);
-            return t?.comment ? <p className="text-xs text-amber-600 italic mt-1 px-1">💬 {t.comment}</p> : null;
-          })()}
+        {/* TICKET TABS SWITCHER */}
+        <div className="flex border-b border-gray-100 bg-gray-50/50 shrink-0 p-1">
+          <button
+            onClick={() => setTicketSidebarView('active')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-black transition-all ${
+              ticketSidebarView === 'active'
+                ? 'bg-white text-pink-600 shadow-sm'
+                : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            {activeTicketId ? '⚡️ EDITANDO' : '📋 ACTUAL'}
+          </button>
+          <button
+            onClick={() => setTicketSidebarView('saved')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-black transition-all relative ${
+              ticketSidebarView === 'saved'
+                ? 'bg-white text-amber-600 shadow-sm'
+                : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            🗄 GUARDADOS
+            {parkedTickets.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center bg-amber-500 text-[10px] text-white rounded-full border-2 border-white shadow-sm ring-1 ring-amber-500/20">
+                {parkedTickets.length}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto px-3 py-2">
-          {cart.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
-              <ShoppingCart className="w-14 h-14 text-gray-200 mb-3" />
-              <p className="font-bold text-sm">Ticket vacío</p>
-              <p className="text-xs mt-1">Toca un producto para agregarlo</p>
-              {parkedTickets.length > 0 && !activeTicketId && (
-                <p className="text-xs mt-3 text-amber-600 font-bold">Tienes {parkedTickets.length} ticket{parkedTickets.length > 1 ? 's' : ''} guardado{parkedTickets.length > 1 ? 's' : ''} ↑</p>
+        {ticketSidebarView === 'active' ? (
+          <>
+            {/* Customer Name */}
+            <div className="px-4 py-2 border-b border-gray-50 shrink-0">
+              <input type="text" placeholder="Nombre del cliente (opcional)" value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent" />
+              {/* Show comment for active ticket */}
+              {activeTicketId && (() => {
+                const t = parkedTickets.find(x => x.id === activeTicketId);
+                return t?.comment ? <p className="text-xs text-amber-600 italic mt-1 px-1">💬 {t.comment}</p> : null;
+              })()}
+            </div>
+
+            {/* Cart Items */}
+            <div className="flex-1 overflow-y-auto px-3 py-2">
+              {cart.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
+                  <ShoppingCart className="w-14 h-14 text-gray-200 mb-3" />
+                  <p className="font-bold text-sm">Ticket vacío</p>
+                  <p className="text-xs mt-1">Toca un producto para agregarlo</p>
+                  {parkedTickets.length > 0 && (
+                    <button onClick={() => setTicketSidebarView('saved')} className="text-xs mt-4 px-4 py-2 bg-amber-50 text-amber-600 rounded-full font-bold border border-amber-100 hover:bg-amber-100 transition-colors">
+                      Tienes {parkedTickets.length} ticket{parkedTickets.length > 1 ? 's' : ''} guardado{parkedTickets.length > 1 ? 's' : ''} →
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {cart.map((item, idx) => (
+                    <div key={item.product.id} className="flex items-center gap-2 py-2 px-2 rounded-xl hover:bg-gray-50 transition-colors group">
+                      <span className="text-gray-300 text-xs font-mono w-4 shrink-0">{idx + 1}</span>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button onClick={() => updateQuantity(item.product.id, -1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 active:scale-90 transition-all">
+                          <Minus size={12} strokeWidth={3} />
+                        </button>
+                        <span className="w-6 text-center font-black text-xs">{item.quantity}</span>
+                        <button onClick={() => updateQuantity(item.product.id, 1)} className="w-6 h-6 rounded-md bg-pink-50 flex items-center justify-center text-pink-600 hover:bg-pink-500 hover:text-white active:scale-90 transition-all">
+                          <Plus size={12} strokeWidth={3} />
+                        </button>
+                      </div>
+                      <p className="flex-1 font-bold text-gray-800 text-[12px] truncate min-w-0">{item.product.name}</p>
+                      <span className="font-black text-gray-900 text-xs shrink-0">{formatPrice(item.product.price * item.quantity)}</span>
+                      <button onClick={() => removeFromCart(item.product.id)} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"><X size={12} /></button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-          ) : (
-            <div className="space-y-0.5">
-              {cart.map((item, idx) => (
-                <div key={item.product.id} className="flex items-center gap-2 py-2 px-2 rounded-xl hover:bg-gray-50 transition-colors group">
-                  <span className="text-gray-300 text-xs font-mono w-4 shrink-0">{idx + 1}</span>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button onClick={() => updateQuantity(item.product.id, -1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 active:scale-90 transition-all">
-                      <Minus size={12} strokeWidth={3} />
-                    </button>
-                    <span className="w-6 text-center font-black text-xs">{item.quantity}</span>
-                    <button onClick={() => updateQuantity(item.product.id, 1)} className="w-6 h-6 rounded-md bg-pink-50 flex items-center justify-center text-pink-600 hover:bg-pink-500 hover:text-white active:scale-90 transition-all">
-                      <Plus size={12} strokeWidth={3} />
-                    </button>
-                  </div>
-                  <p className="flex-1 font-bold text-gray-800 text-[12px] truncate min-w-0">{item.product.name}</p>
-                  <span className="font-black text-gray-900 text-xs shrink-0">{formatPrice(item.product.price * item.quantity)}</span>
-                  <button onClick={() => removeFromCart(item.product.id)} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"><X size={12} /></button>
-                </div>
-              ))}
+          </>
+        ) : (
+          /* SAVED TICKETS VIEW */
+          <div className="flex-1 overflow-y-auto px-3 py-4 bg-gray-50/30">
+            <div className="flex items-center justify-between mb-4 px-1">
+              <h3 className="font-black text-gray-800 text-sm tracking-tight">TICKETS GUARDADOS</h3>
+              <button onClick={startNewTicket} className="flex items-center gap-1.5 px-3 py-1.5 bg-pink-500 text-white text-[10px] font-black rounded-lg hover:bg-pink-600 transition-all active:scale-95 shadow-lg shadow-pink-500/20">
+                <Plus size={12} /> NUEVO
+              </button>
             </div>
-          )}
-        </div>
+
+            {parkedTickets.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-gray-400">
+                <Bookmark className="w-12 h-12 text-gray-200 mb-3" />
+                <p className="font-bold text-sm">No hay tickets</p>
+                <p className="text-xs mt-1">Guarda pedidos para retomarlos luego</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2.5">
+                {[...parkedTickets].reverse().map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => openTicket(t.id)}
+                    className={`flex flex-col text-left p-4 rounded-2xl border-2 transition-all active:scale-[0.98] relative overflow-hidden group ${
+                      activeTicketId === t.id
+                        ? 'bg-amber-50 border-amber-400 shadow-lg shadow-amber-500/10'
+                        : 'bg-white border-gray-100 hover:border-amber-200 hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeTicketId === t.id ? 'bg-amber-400 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                          {t.customerName.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-black text-gray-900 text-sm leading-none mb-0.5 truncate max-w-[140px]">{t.customerName}</p>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{t.parkedAt}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-black text-gray-900 text-sm">{formatPrice(t.total)}</p>
+                        <p className="text-[10px] font-bold text-gray-400">{t.items.length} items</p>
+                      </div>
+                    </div>
+
+                    {/* ITEM DETAILS IN SAVED VIEW */}
+                    <div className="mb-3 space-y-1">
+                      {t.items.slice(0, 3).map((item, i) => (
+                        <div key={i} className="flex justify-between items-center text-[11px] text-gray-500 font-medium">
+                          <span className="truncate max-w-[160px]">{item.quantity}x {item.product.name}</span>
+                          <span>{formatPrice(item.product.price * item.quantity)}</span>
+                        </div>
+                      ))}
+                      {t.items.length > 3 && (
+                        <p className="text-[10px] text-gray-400 font-bold italic">+ {t.items.length - 3} más...</p>
+                      )}
+                    </div>
+
+                    {t.comment && (
+                      <div className="bg-amber-100/30 rounded-lg p-2 mb-2">
+                        <p className="text-xs text-amber-700 italic flex items-center gap-1.5">
+                          <Clock size={10} /> {t.comment}
+                        </p>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center justify-between mt-2 border-t border-gray-100 pt-3">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            const orderToPrint = {
+                              id: t.id,
+                              customer_name: t.customerName,
+                              items: t.items.map(i => ({ ...i.product, quantity: i.quantity })),
+                              total: t.total,
+                              created_at: new Date().toISOString(),
+                              branch_name: activeBranch
+                            };
+                            ESCPOSPrinter.printOrder(orderToPrint, 'kitchen');
+                          }}
+                          className="p-2 bg-gray-50 text-gray-500 hover:bg-orange-50 hover:text-orange-600 rounded-xl transition-all border border-gray-100"
+                          title="Imprimir Comanda (Cocina)"
+                        >
+                          <ChefHat size={14} />
+                        </button>
+                        <button
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            const orderToPrint = {
+                              id: t.id,
+                              customer_name: t.customerName,
+                              items: t.items.map(i => ({ ...i.product, quantity: i.quantity })),
+                              total: t.total,
+                              created_at: new Date().toISOString(),
+                              branch_name: activeBranch
+                            };
+                            ESCPOSPrinter.printOrder(orderToPrint, 'cashier', false);
+                          }}
+                          className="p-2 bg-gray-50 text-gray-500 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-all border border-gray-100"
+                          title="Imprimir Proforma (Adeudado)"
+                        >
+                          <Printer size={14} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteParkedTicket(t.id); }}
+                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+
+                      <div className={`px-4 py-1.5 rounded-xl font-black text-[10px] transition-all ${
+                        activeTicketId === t.id
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-gray-100 text-gray-600 group-hover:bg-amber-100 group-hover:text-amber-700'
+                      }`}>
+                        {activeTicketId === t.id ? 'ABIERTO' : 'ABRIR'}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Success Message */}
         {lastSaleTotal !== null && (
@@ -1096,18 +1241,18 @@ export default function StandalonePOSPage() {
               onClick={() => {
                 if (cart.length > 0 && !activeTicketId) { openParkModal(); }
                 else if (activeTicketId) { startNewTicket(); }
+                else { setTicketSidebarView('saved'); }
               }}
-              disabled={cart.length === 0 && !activeTicketId}
               className={`col-span-2 flex flex-col items-center justify-center gap-0.5 py-3 rounded-2xl font-black text-xs transition-all active:scale-95 ${
                 activeTicketId
                   ? 'bg-gray-700 hover:bg-gray-800 text-white'
                   : cart.length > 0
                     ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
               }`}
             >
-              {activeTicketId ? <Plus size={18} /> : <Save size={18} />}
-              {activeTicketId ? 'NUEVO' : 'GUARDAR'}
+              {activeTicketId ? <Plus size={18} /> : cart.length > 0 ? <Save size={18} /> : <Bookmark size={18} />}
+              {activeTicketId ? 'NUEVO' : cart.length > 0 ? 'GUARDAR' : 'VER GUARD.'}
             </button>
 
             {/* COBRAR BUTTON */}

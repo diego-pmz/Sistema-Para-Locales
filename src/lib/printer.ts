@@ -93,7 +93,7 @@ export class ESCPOSPrinter {
   }
 
   // Genera el Array de Bytes ESC/POS (80mm)
-  static generateReceiptBytes(order: any, role: 'kitchen' | 'cashier'): Uint8Array {
+  static generateReceiptBytes(order: any, role: 'kitchen' | 'cashier', isPaid: boolean = true): Uint8Array {
     let bytes: number[] = [];
 
     // Comandos base ESC/POS
@@ -151,7 +151,15 @@ export class ESCPOSPrinter {
     // Tipo de Ticket
     bytes.push(...DOUBLE_HEIGHT);
     bytes.push(...BOLD_ON);
-    addLines([role === 'kitchen' ? "COMANDA DE COCINA" : "TICKET DE VENTA"]);
+    if (role === 'kitchen') {
+      addLines(["COMANDA DE COCINA"]);
+    } else {
+      addLines([isPaid ? "TICKET DE VENTA" : "TICKET DE CONTROL"]);
+      bytes.push(...NORMAL_SIZE);
+      bytes.push(...BOLD_OFF);
+      bytes.push(...ALIGN_CENTER);
+      addLines([isPaid ? "--- PAGADO ---" : "--- IMPORTE ADEUDADO ---"]);
+    }
     bytes.push(...NORMAL_SIZE);
     bytes.push(...BOLD_OFF);
     
@@ -259,7 +267,10 @@ export class ESCPOSPrinter {
     // --- 5. TOTALES (Solo para Cajero) ---
     if (role === 'cashier') {
         const paymentMeta = order.items.find((i:any) => i._isPaymentMetadata);
-        const methodStr = paymentMeta?.method === 'online' || paymentMeta?.isPaidOnline ? 'ONLINE/TARJETA' : 'PRESENCIAL';
+        let methodStr = 'PENDIENTE';
+        if (isPaid) {
+          methodStr = paymentMeta?.method === 'online' || paymentMeta?.isPaidOnline ? 'ONLINE/TARJETA' : 'PRESENCIAL';
+        }
 
         addLines([alignLeftRight("METODO PAGO:", methodStr, 48)]);
         
@@ -291,14 +302,14 @@ export class ESCPOSPrinter {
   }
 
   // Segmenta y encia los bytes progresivamente debido a límites BLE
-  static async printOrder(order: any, role: 'kitchen' | 'cashier'): Promise<void> {
+  static async printOrder(order: any, role: 'kitchen' | 'cashier', isPaid: boolean = true): Promise<void> {
     const char = role === 'kitchen' ? this.kitchenCharacteristic : this.cashierCharacteristic;
 
     if (!this.isConnected(role) || !char) {
       throw new Error(`Impresora de ${role} no está conectada o característica BLE perdida.`);
     }
 
-    const payload = this.generateReceiptBytes(order, role);
+    const payload = this.generateReceiptBytes(order, role, isPaid);
     const CHUNK_SIZE = 512; // MTU máximo seguro estandar BLE
     
     for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
