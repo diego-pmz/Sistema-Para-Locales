@@ -60,10 +60,10 @@ export default function StandalonePOSPage() {
   const [editMode, setEditMode] = useState(false);
 
   // POS Layout customization (stored in localStorage)
-  // hiddenProducts: Set of product IDs hidden from sales grid
-  // productOrder: Record<categoryId, productId[]> for custom ordering
   const [hiddenProducts, setHiddenProducts] = useState<Set<string>>(new Set());
   const [productOrder, setProductOrder] = useState<Record<string, string[]>>({});
+  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set());
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
 
   // Payment modal
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -98,6 +98,8 @@ export default function StandalonePOSPage() {
       const parsed = JSON.parse(layout);
       setHiddenProducts(new Set(parsed.hidden || []));
       setProductOrder(parsed.order || {});
+      setHiddenCategories(new Set(parsed.hiddenCats || []));
+      setCategoryOrder(parsed.catOrder || []);
     }
   }, []);
 
@@ -137,10 +139,17 @@ export default function StandalonePOSPage() {
     : [];
 
   // Save POS layout to localStorage
-  const savePOSLayout = (hidden: Set<string>, order: Record<string, string[]>) => {
+  const savePOSLayout = (hidden: Set<string>, order: Record<string, string[]>, hidCats?: Set<string>, catOrd?: string[]) => {
+    const h = hidCats ?? hiddenCategories;
+    const co = catOrd ?? categoryOrder;
     setHiddenProducts(hidden);
     setProductOrder(order);
-    localStorage.setItem('pos-layout', JSON.stringify({ hidden: Array.from(hidden), order }));
+    setHiddenCategories(h);
+    setCategoryOrder(co);
+    localStorage.setItem('pos-layout', JSON.stringify({
+      hidden: Array.from(hidden), order,
+      hiddenCats: Array.from(h), catOrder: co,
+    }));
   };
 
   const toggleProductVisibility = (productId: string) => {
@@ -160,6 +169,38 @@ export default function StandalonePOSPage() {
     const newOrder = [...currentOrder];
     [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
     savePOSLayout(hiddenProducts, { ...productOrder, [catId]: newOrder });
+  };
+
+  const toggleCategoryVisibility = (catId: string) => {
+    const newHidden = new Set(hiddenCategories);
+    if (newHidden.has(catId)) newHidden.delete(catId);
+    else newHidden.add(catId);
+    savePOSLayout(hiddenProducts, productOrder, newHidden);
+  };
+
+  const moveCategory = (catId: string, direction: 'up' | 'down') => {
+    const currentOrder = categoryOrder.length > 0 ? categoryOrder : categories.map((c) => c.id);
+    const idx = currentOrder.indexOf(catId);
+    if (idx === -1) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= currentOrder.length) return;
+    const newOrder = [...currentOrder];
+    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
+    savePOSLayout(hiddenProducts, productOrder, undefined, newOrder);
+  };
+
+  // Get ordered categories
+  const getOrderedCategories = () => {
+    if (categoryOrder.length === 0) return categories;
+    const ordered: typeof categories = [];
+    for (const id of categoryOrder) {
+      const c = categories.find((x) => x.id === id);
+      if (c) ordered.push(c);
+    }
+    for (const c of categories) {
+      if (!categoryOrder.includes(c.id)) ordered.push(c);
+    }
+    return ordered;
   };
 
   // ─── CART OPERATIONS ───────────────────────────────────
@@ -407,20 +448,75 @@ export default function StandalonePOSPage() {
     return (
       <div className="flex-1 overflow-y-auto p-4">
         {!selectedCategory ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {categories.map((cat) => {
-              const count = getProductCount(cat.id);
-              const emoji = catEmoji[cat.id] || '📦';
-              return (
-                <button key={cat.id} onClick={() => setSelectedCategory(cat.id)}
-                  className="flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-gray-100 hover:border-pink-300 p-6 md:p-8 text-center transition-all active:scale-[0.95] shadow-sm hover:shadow-xl hover:shadow-pink-500/10 group">
-                  <span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{emoji}</span>
-                  <h3 className="font-black text-gray-900 text-base md:text-lg leading-tight mb-1">{cat.name}</h3>
-                  <span className="text-xs font-bold text-gray-400">{count} productos</span>
-                </button>
-              );
-            })}
-          </div>
+          <>
+            {/* EDIT MODE TOGGLE for categories */}
+            <div className="flex items-center justify-end mb-3 gap-2">
+              <button
+                onClick={() => setEditMode(!editMode)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95 ${
+                  editMode
+                    ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Pencil size={14} />
+                {editMode ? 'Listo' : 'Editar'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {(() => {
+                const orderedCats = getOrderedCategories();
+                const displayCats = editMode ? orderedCats : orderedCats.filter((c) => !hiddenCategories.has(c.id));
+                return displayCats.map((cat, idx) => {
+                  const count = getProductCount(cat.id);
+                  const emoji = catEmoji[cat.id] || '📦';
+                  const isHidden = hiddenCategories.has(cat.id);
+
+                  if (editMode) {
+                    return (
+                      <div key={cat.id}
+                        className={`flex flex-col items-center justify-center bg-white rounded-3xl border-2 p-6 md:p-8 text-center transition-all shadow-sm ${
+                          isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : 'border-gray-100'
+                        }`}>
+                        {/* Controls row */}
+                        <div className="flex items-center gap-2 mb-3 w-full justify-between">
+                          <div className="flex gap-1">
+                            <button onClick={() => moveCategory(cat.id, 'up')} disabled={idx === 0}
+                              className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
+                              <ArrowUp size={12} />
+                            </button>
+                            <button onClick={() => moveCategory(cat.id, 'down')} disabled={idx === displayCats.length - 1}
+                              className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
+                              <ArrowDown size={12} />
+                            </button>
+                          </div>
+                          <button onClick={() => toggleCategoryVisibility(cat.id)}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
+                              isHidden ? 'bg-red-50 text-red-400 hover:bg-red-100' : 'bg-green-50 text-green-500 hover:bg-green-100'
+                            }`}>
+                            {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                        <span className="text-4xl md:text-5xl mb-2">{emoji}</span>
+                        <h3 className="font-black text-gray-900 text-sm md:text-base leading-tight mb-1">{cat.name}</h3>
+                        <span className="text-xs font-bold text-gray-400">{count} productos</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button key={cat.id} onClick={() => setSelectedCategory(cat.id)}
+                      className="flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-gray-100 hover:border-pink-300 p-6 md:p-8 text-center transition-all active:scale-[0.95] shadow-sm hover:shadow-xl hover:shadow-pink-500/10 group">
+                      <span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{emoji}</span>
+                      <h3 className="font-black text-gray-900 text-base md:text-lg leading-tight mb-1">{cat.name}</h3>
+                      <span className="text-xs font-bold text-gray-400">{count} productos</span>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </>
         ) : (
           <>
             {/* EDIT MODE TOGGLE */}
@@ -551,7 +647,7 @@ export default function StandalonePOSPage() {
 
   const renderProductsView = () => {
     const resetLayout = () => {
-      savePOSLayout(new Set(), {});
+      savePOSLayout(new Set(), {}, new Set(), []);
     };
 
     return (
