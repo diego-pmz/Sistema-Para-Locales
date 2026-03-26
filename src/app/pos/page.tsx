@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { categories, products } from '@/lib/mock-db';
 import { Product } from '@/types';
 import { supabase } from '@/lib/supabase';
@@ -12,7 +12,7 @@ import {
   Menu, XCircle, TrendingUp, Package, Settings, FileText,
   Bookmark, ChevronRight, Clock, DollarSign, Bluetooth, ChefHat,
   UserCircle, AlertTriangle, RefreshCcw, Save, FolderOpen,
-  Pencil, Eye, EyeOff, ArrowUp, ArrowDown
+  Pencil, Eye, EyeOff, GripVertical
 } from 'lucide-react';
 
 // ─── TYPES ─────────────────────────────────────────────
@@ -58,6 +58,9 @@ export default function StandalonePOSPage() {
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [editMode, setEditMode] = useState(false);
+  const dragItem = useRef<string | null>(null);
+  const dragOverItem = useRef<string | null>(null);
+  const [dragActiveId, setDragActiveId] = useState<string | null>(null);
 
   // POS Layout customization (stored in localStorage)
   const [hiddenProducts, setHiddenProducts] = useState<Set<string>>(new Set());
@@ -159,15 +162,16 @@ export default function StandalonePOSPage() {
     savePOSLayout(newHidden, productOrder);
   };
 
-  const moveProduct = (catId: string, productId: string, direction: 'up' | 'down') => {
+  const moveProduct = (catId: string, fromId: string, toId: string) => {
+    if (fromId === toId) return;
     const catProducts = products.filter((p) => p.categoryId === catId && p.isAvailable);
     const currentOrder = productOrder[catId] || catProducts.map((p) => p.id);
-    const idx = currentOrder.indexOf(productId);
-    if (idx === -1) return;
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= currentOrder.length) return;
+    const fromIdx = currentOrder.indexOf(fromId);
+    const toIdx = currentOrder.indexOf(toId);
+    if (fromIdx === -1 || toIdx === -1) return;
     const newOrder = [...currentOrder];
-    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
+    newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, fromId);
     savePOSLayout(hiddenProducts, { ...productOrder, [catId]: newOrder });
   };
 
@@ -178,15 +182,15 @@ export default function StandalonePOSPage() {
     savePOSLayout(hiddenProducts, productOrder, newHidden);
   };
 
-  const moveCategory = (catId: string, direction: 'up' | 'down') => {
-    const currentOrder = categoryOrder.length > 0 ? categoryOrder : categories.map((c) => c.id);
-    const idx = currentOrder.indexOf(catId);
-    if (idx === -1) return;
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= currentOrder.length) return;
-    const newOrder = [...currentOrder];
-    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
-    savePOSLayout(hiddenProducts, productOrder, undefined, newOrder);
+  const moveCategory = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const currentOrder = categoryOrder.length > 0 ? [...categoryOrder] : categories.map((c) => c.id);
+    const fromIdx = currentOrder.indexOf(fromId);
+    const toIdx = currentOrder.indexOf(toId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    currentOrder.splice(fromIdx, 1);
+    currentOrder.splice(toIdx, 0, fromId);
+    savePOSLayout(hiddenProducts, productOrder, undefined, currentOrder);
   };
 
   // Get ordered categories
@@ -476,31 +480,27 @@ export default function StandalonePOSPage() {
                   if (editMode) {
                     return (
                       <div key={cat.id}
-                        className={`flex flex-col items-center justify-center bg-white rounded-3xl border-2 p-6 md:p-8 text-center transition-all shadow-sm ${
-                          isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : 'border-gray-100'
+                        draggable
+                        onDragStart={() => { dragItem.current = cat.id; setDragActiveId(cat.id); }}
+                        onDragEnter={() => { dragOverItem.current = cat.id; }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDragEnd={() => { if (dragItem.current && dragOverItem.current) moveCategory(dragItem.current, dragOverItem.current); dragItem.current = null; dragOverItem.current = null; setDragActiveId(null); }}
+                        className={`flex flex-col items-center justify-center bg-white rounded-3xl border-2 p-6 md:p-8 text-center transition-all shadow-sm cursor-grab active:cursor-grabbing select-none ${
+                          isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : dragActiveId === cat.id ? 'border-amber-400 ring-2 ring-amber-200 scale-105 shadow-xl z-10' : 'border-gray-100 hover:border-amber-300'
                         }`}>
                         {/* Controls row */}
                         <div className="flex items-center gap-2 mb-3 w-full justify-between">
-                          <div className="flex gap-1">
-                            <button onClick={() => moveCategory(cat.id, 'up')} disabled={idx === 0}
-                              className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
-                              <ArrowUp size={12} />
-                            </button>
-                            <button onClick={() => moveCategory(cat.id, 'down')} disabled={idx === displayCats.length - 1}
-                              className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
-                              <ArrowDown size={12} />
-                            </button>
-                          </div>
-                          <button onClick={() => toggleCategoryVisibility(cat.id)}
+                          <GripVertical size={16} className="text-gray-300" />
+                          <button onClick={(e) => { e.stopPropagation(); toggleCategoryVisibility(cat.id); }}
                             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
                               isHidden ? 'bg-red-50 text-red-400 hover:bg-red-100' : 'bg-green-50 text-green-500 hover:bg-green-100'
                             }`}>
                             {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
                           </button>
                         </div>
-                        <span className="text-4xl md:text-5xl mb-2">{emoji}</span>
-                        <h3 className="font-black text-gray-900 text-sm md:text-base leading-tight mb-1">{cat.name}</h3>
-                        <span className="text-xs font-bold text-gray-400">{count} productos</span>
+                        <span className="text-4xl md:text-5xl mb-2 pointer-events-none">{emoji}</span>
+                        <h3 className="font-black text-gray-900 text-sm md:text-base leading-tight mb-1 pointer-events-none">{cat.name}</h3>
+                        <span className="text-xs font-bold text-gray-400 pointer-events-none">{count} productos</span>
                       </div>
                     );
                   }
@@ -542,33 +542,26 @@ export default function StandalonePOSPage() {
                 if (editMode) {
                   return (
                     <div key={product.id}
-                      className={`relative flex flex-col bg-white rounded-2xl border-2 p-3 text-left transition-all shadow-sm ${
-                        isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : 'border-gray-100'
+                      draggable
+                      onDragStart={() => { dragItem.current = product.id; setDragActiveId(product.id); }}
+                      onDragEnter={() => { dragOverItem.current = product.id; }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDragEnd={() => { if (dragItem.current && dragOverItem.current && selectedCategory) moveProduct(selectedCategory, dragItem.current, dragOverItem.current); dragItem.current = null; dragOverItem.current = null; setDragActiveId(null); }}
+                      className={`relative flex flex-col bg-white rounded-2xl border-2 p-3 text-left transition-all shadow-sm cursor-grab active:cursor-grabbing select-none ${
+                        isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : dragActiveId === product.id ? 'border-amber-400 ring-2 ring-amber-200 scale-105 shadow-xl z-10' : 'border-gray-100 hover:border-amber-300'
                       }`}>
-                      {/* Move arrows */}
+                      {/* Drag handle + toggle */}
                       <div className="flex justify-between items-center mb-2">
-                        <div className="flex gap-1">
-                          <button onClick={() => moveProduct(selectedCategory!, product.id, 'up')} disabled={idx === 0}
-                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
-                            <ArrowUp size={12} />
-                          </button>
-                          <button onClick={() => moveProduct(selectedCategory!, product.id, 'down')} disabled={idx === displayProducts.length - 1}
-                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
-                            <ArrowDown size={12} />
-                          </button>
-                        </div>
-                        {/* Toggle visibility */}
-                        <button onClick={() => toggleProductVisibility(product.id)}
+                        <GripVertical size={16} className="text-gray-300" />
+                        <button onClick={(e) => { e.stopPropagation(); toggleProductVisibility(product.id); }}
                           className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
-                            isHidden
-                              ? 'bg-red-50 text-red-400 hover:bg-red-100'
-                              : 'bg-green-50 text-green-500 hover:bg-green-100'
+                            isHidden ? 'bg-red-50 text-red-400 hover:bg-red-100' : 'bg-green-50 text-green-500 hover:bg-green-100'
                           }`}>
                           {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
-                      <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">{product.name}</h3>
-                      <span className="font-black text-pink-600 text-sm mt-auto">{formatPrice(product.price)}</span>
+                      <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px] pointer-events-none">{product.name}</h3>
+                      <span className="font-black text-pink-600 text-sm mt-auto pointer-events-none">{formatPrice(product.price)}</span>
                     </div>
                   );
                 }
@@ -659,7 +652,7 @@ export default function StandalonePOSPage() {
               Resetear Layout
             </button>
           </div>
-          <p className="text-gray-500 text-sm mb-6">Activa/desactiva productos y reorganiza el orden con las flechas. Los cambios se guardan automáticamente en este dispositivo.</p>
+          <p className="text-gray-500 text-sm mb-6">Arrastra para reorganizar y usa los toggles para mostrar/ocultar. Los cambios se guardan automáticamente.</p>
 
           {categories.map((cat) => {
             const orderedProducts = getOrderedProducts(cat.id);
@@ -671,21 +664,18 @@ export default function StandalonePOSPage() {
                   <span className="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{visibleCount}/{orderedProducts.length}</span>
                 </h3>
                 <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm divide-y divide-gray-50">
-                  {orderedProducts.map((p, idx) => {
+                  {orderedProducts.map((p) => {
                     const isHidden = hiddenProducts.has(p.id);
                     return (
-                      <div key={p.id} className={`flex items-center gap-3 px-4 py-3 transition-colors ${isHidden ? 'opacity-40 bg-gray-50' : ''}`}>
-                        {/* Move arrows */}
-                        <div className="flex flex-col gap-0.5 shrink-0">
-                          <button onClick={() => moveProduct(cat.id, p.id, 'up')} disabled={idx === 0}
-                            className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors active:scale-90">
-                            <ChevronDown size={14} className="rotate-180" />
-                          </button>
-                          <button onClick={() => moveProduct(cat.id, p.id, 'down')} disabled={idx === orderedProducts.length - 1}
-                            className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors active:scale-90">
-                            <ChevronDown size={14} />
-                          </button>
-                        </div>
+                      <div key={p.id}
+                        draggable
+                        onDragStart={() => { dragItem.current = p.id; setDragActiveId(p.id); }}
+                        onDragEnter={() => { dragOverItem.current = p.id; }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDragEnd={() => { if (dragItem.current && dragOverItem.current) moveProduct(cat.id, dragItem.current, dragOverItem.current); dragItem.current = null; dragOverItem.current = null; setDragActiveId(null); }}
+                        className={`flex items-center gap-3 px-4 py-3 transition-colors cursor-grab active:cursor-grabbing select-none ${isHidden ? 'opacity-40 bg-gray-50' : ''} ${dragActiveId === p.id ? 'bg-amber-50 border-l-4 border-l-amber-400' : ''}`}>
+                        {/* Drag handle */}
+                        <GripVertical size={16} className="text-gray-300 shrink-0" />
 
                         {/* Product info */}
                         <div className="flex-1 min-w-0">
@@ -694,7 +684,7 @@ export default function StandalonePOSPage() {
                         </div>
 
                         {/* Toggle switch */}
-                        <button onClick={() => toggleProductVisibility(p.id)}
+                        <button onClick={(e) => { e.stopPropagation(); toggleProductVisibility(p.id); }}
                           className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${isHidden ? 'bg-gray-300' : 'bg-green-500'}`}>
                           <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-all ${isHidden ? 'left-0.5' : 'left-[22px]'}`} />
                         </button>
