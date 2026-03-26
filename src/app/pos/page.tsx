@@ -73,9 +73,9 @@ export default function StandalonePOSPage() {
   const [processing, setProcessing] = useState(false);
   const [lastSaleTotal, setLastSaleTotal] = useState<number | null>(null);
 
-  // Parked tickets
+  // Multi-ticket system
   const [parkedTickets, setParkedTickets] = useState<ParkedTicket[]>([]);
-  const [showParkedList, setShowParkedList] = useState(false);
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [parkModalOpen, setParkModalOpen] = useState(false);
   const [parkName, setParkName] = useState('');
   const [parkComment, setParkComment] = useState('');
@@ -237,7 +237,38 @@ export default function StandalonePOSPage() {
     setCustomerName('');
   }, []);
 
-  // ─── TICKET PARKING ─────────────────────────────────
+  // ─── MULTI-TICKET SYSTEM ──────────────────────────────
+  // Auto-save cart changes back to the active ticket
+  const autoSaveActiveTicket = useCallback((newCart: POSCartItem[], newName?: string) => {
+    if (!activeTicketId) return;
+    setParkedTickets((prev) => {
+      const updated = prev.map((t) =>
+        t.id === activeTicketId
+          ? { ...t, items: newCart, total: newCart.reduce((s, i) => s + i.product.price * i.quantity, 0), customerName: newName ?? t.customerName }
+          : t
+      );
+      localStorage.setItem('pos-parked-tickets', JSON.stringify(updated));
+      return updated;
+    });
+  }, [activeTicketId]);
+
+  // Override addToCart to also auto-save
+  useEffect(() => {
+    if (activeTicketId && cart.length >= 0) {
+      autoSaveActiveTicket(cart);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, activeTicketId]);
+
+  // Save name changes to active ticket
+  useEffect(() => {
+    if (activeTicketId && customerName !== undefined) {
+      autoSaveActiveTicket(cart, customerName || 'Sin nombre');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerName]);
+
+  // Open the park modal for NEW tickets only
   const openParkModal = () => {
     if (cart.length === 0) return;
     setParkName(customerName);
@@ -245,6 +276,7 @@ export default function StandalonePOSPage() {
     setParkModalOpen(true);
   };
 
+  // Confirm saving a NEW ticket
   const confirmParkTicket = () => {
     const ticket: ParkedTicket = {
       id: Date.now().toString(),
@@ -255,22 +287,42 @@ export default function StandalonePOSPage() {
       total: cartTotal,
     };
     saveParkedToStorage([...parkedTickets, ticket]);
-    clearCart();
+    setActiveTicketId(ticket.id);
+    setCustomerName(ticket.customerName === 'Sin nombre' ? '' : ticket.customerName);
     setParkModalOpen(false);
     setParkName('');
     setParkComment('');
   };
 
-  const restoreTicket = (ticketId: string) => {
+  // Open (expand) a saved ticket
+  const openTicket = (ticketId: string) => {
+    if (activeTicketId === ticketId) {
+      // Minimize: deselect, clear cart to "new ticket" state
+      setActiveTicketId(null);
+      setCart([]);
+      setCustomerName('');
+      return;
+    }
     const ticket = parkedTickets.find((t) => t.id === ticketId);
     if (!ticket) return;
+    setActiveTicketId(ticketId);
     setCart(ticket.items);
     setCustomerName(ticket.customerName === 'Sin nombre' ? '' : ticket.customerName);
-    saveParkedToStorage(parkedTickets.filter((t) => t.id !== ticketId));
-    setShowParkedList(false);
+  };
+
+  // Start a new empty ticket (deselect active)
+  const startNewTicket = () => {
+    setActiveTicketId(null);
+    setCart([]);
+    setCustomerName('');
   };
 
   const deleteParkedTicket = (ticketId: string) => {
+    if (activeTicketId === ticketId) {
+      setActiveTicketId(null);
+      setCart([]);
+      setCustomerName('');
+    }
     saveParkedToStorage(parkedTickets.filter((t) => t.id !== ticketId));
   };
 
@@ -313,6 +365,12 @@ export default function StandalonePOSPage() {
 
       setLastSaleTotal(cartTotal);
       setPaymentModalOpen(false);
+
+      // Remove the ticket from parked list if it was a saved ticket
+      if (activeTicketId) {
+        saveParkedToStorage(parkedTickets.filter((t) => t.id !== activeTicketId));
+        setActiveTicketId(null);
+      }
       clearCart();
       setTimeout(() => setLastSaleTotal(null), 3000);
     } catch (err: any) {
@@ -924,61 +982,74 @@ export default function StandalonePOSPage() {
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-900 text-white">
           <div className="flex items-center gap-2">
             <ReceiptText size={18} />
-            <h2 className="font-black text-base tracking-tight">TICKET</h2>
+            <h2 className="font-black text-base tracking-tight">
+              {activeTicketId ? (parkedTickets.find(t => t.id === activeTicketId)?.customerName || 'TICKET') : 'NUEVO TICKET'}
+            </h2>
             {cartItemCount > 0 && <span className="bg-pink-500 text-white text-xs font-black px-2 py-0.5 rounded-full">{cartItemCount}</span>}
           </div>
           {cart.length > 0 && (
-            <button onClick={clearCart} className="text-gray-400 hover:text-red-400 transition-colors p-1"><Trash2 size={16} /></button>
+            <button onClick={() => { if (activeTicketId) { deleteParkedTicket(activeTicketId); } else { clearCart(); } }} className="text-gray-400 hover:text-red-400 transition-colors p-1" title={activeTicketId ? 'Eliminar ticket' : 'Vaciar carrito'}><Trash2 size={16} /></button>
           )}
         </div>
+
+        {/* TICKET TABS STRIP */}
+        {parkedTickets.length > 0 && (
+          <div className="px-2 py-2 border-b border-gray-100 shrink-0 overflow-x-auto">
+            <div className="flex gap-1.5 items-center">
+              {/* New ticket tab */}
+              <button onClick={startNewTicket}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 shrink-0 ${
+                  !activeTicketId ? 'bg-pink-500 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}>
+                <Plus size={12} /> Nuevo
+              </button>
+
+              {/* Saved ticket tabs */}
+              {parkedTickets.map((t) => (
+                <button key={t.id} onClick={() => openTicket(t.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 shrink-0 group ${
+                    activeTicketId === t.id
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-600 hover:bg-amber-50 hover:text-amber-700'
+                  }`}>
+                  <span className="truncate max-w-[80px]">{t.customerName}</span>
+                  <span className={`text-[10px] font-black ${activeTicketId === t.id ? 'text-amber-100' : 'text-gray-400'}`}>{formatPrice(t.total)}</span>
+                  <button onClick={(e) => { e.stopPropagation(); deleteParkedTicket(t.id); }}
+                    className={`ml-0.5 rounded-full w-4 h-4 flex items-center justify-center transition-colors ${
+                      activeTicketId === t.id ? 'text-amber-200 hover:text-white hover:bg-amber-600' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+                    }`}>
+                    <X size={10} />
+                  </button>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Customer Name */}
         <div className="px-4 py-2 border-b border-gray-50 shrink-0">
           <input type="text" placeholder="Nombre del cliente (opcional)" value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent" />
+          {/* Show comment for active ticket */}
+          {activeTicketId && (() => {
+            const t = parkedTickets.find(x => x.id === activeTicketId);
+            return t?.comment ? <p className="text-xs text-amber-600 italic mt-1 px-1">💬 {t.comment}</p> : null;
+          })()}
         </div>
 
         {/* Cart Items */}
         <div className="flex-1 overflow-y-auto px-3 py-2">
-          {cart.length === 0 && !showParkedList ? (
+          {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
               <ShoppingCart className="w-14 h-14 text-gray-200 mb-3" />
               <p className="font-bold text-sm">Ticket vacío</p>
               <p className="text-xs mt-1">Toca un producto para agregarlo</p>
-            </div>
-          ) : showParkedList ? (
-            /* Parked Tickets List */
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-black text-gray-700 text-sm">Tickets Guardados</h3>
-                <button onClick={() => setShowParkedList(false)} className="text-xs text-gray-400 hover:text-gray-600 font-bold">Cerrar</button>
-              </div>
-              {parkedTickets.length === 0 ? (
-                <p className="text-center text-gray-400 text-sm py-8">No hay tickets guardados</p>
-              ) : (
-                parkedTickets.map((t) => (
-                  <div key={t.id} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-gray-800 text-sm">{t.customerName}</span>
-                      <span className="text-xs text-gray-400">{t.parkedAt}</span>
-                    </div>
-                    <p className="text-xs text-gray-500">{t.items.length} items · {formatPrice(t.total)}</p>
-                    {t.comment && <p className="text-xs text-amber-600 italic mt-0.5">💬 {t.comment}</p>}
-                    <div className="flex gap-2 mt-2">
-                      <button onClick={() => restoreTicket(t.id)} className="flex-1 px-3 py-1.5 bg-pink-500 text-white text-xs font-bold rounded-lg hover:bg-pink-600 transition-colors">
-                        Restaurar
-                      </button>
-                      <button onClick={() => deleteParkedTicket(t.id)} className="px-3 py-1.5 bg-red-50 text-red-500 text-xs font-bold rounded-lg hover:bg-red-100 transition-colors">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </div>
-                ))
+              {parkedTickets.length > 0 && !activeTicketId && (
+                <p className="text-xs mt-3 text-amber-600 font-bold">Tienes {parkedTickets.length} ticket{parkedTickets.length > 1 ? 's' : ''} guardado{parkedTickets.length > 1 ? 's' : ''} ↑</p>
               )}
             </div>
           ) : (
-            /* Cart Items */
             <div className="space-y-0.5">
               {cart.map((item, idx) => (
                 <div key={item.product.id} className="flex items-center gap-2 py-2 px-2 rounded-xl hover:bg-gray-50 transition-colors group">
@@ -1019,25 +1090,27 @@ export default function StandalonePOSPage() {
             <span className="text-3xl font-black text-gray-900">{formatPrice(cartTotal)}</span>
           </div>
 
-          {/* Park / Saved tickets button + Cobrar button */}
           <div className="grid grid-cols-5 gap-2">
-            {/* PARK / SAVED BUTTON (1/3 width) */}
+            {/* GUARDAR BUTTON - only for NEW tickets (no activeTicketId) */}
             <button
               onClick={() => {
-                if (cart.length > 0) { openParkModal(); }
-                else { setShowParkedList(!showParkedList); }
+                if (cart.length > 0 && !activeTicketId) { openParkModal(); }
+                else if (activeTicketId) { startNewTicket(); }
               }}
+              disabled={cart.length === 0 && !activeTicketId}
               className={`col-span-2 flex flex-col items-center justify-center gap-0.5 py-3 rounded-2xl font-black text-xs transition-all active:scale-95 ${
-                cart.length > 0
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30'
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                activeTicketId
+                  ? 'bg-gray-700 hover:bg-gray-800 text-white'
+                  : cart.length > 0
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
-              {cart.length > 0 ? <Save size={18} /> : <FolderOpen size={18} />}
-              {cart.length > 0 ? 'GUARDAR' : `GUARDADOS${parkedTickets.length > 0 ? ` (${parkedTickets.length})` : ''}`}
+              {activeTicketId ? <Plus size={18} /> : <Save size={18} />}
+              {activeTicketId ? 'NUEVO' : 'GUARDAR'}
             </button>
 
-            {/* COBRAR BUTTON (2/3 width) */}
+            {/* COBRAR BUTTON */}
             <button
               onClick={() => setPaymentModalOpen(true)}
               disabled={cart.length === 0}
