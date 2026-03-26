@@ -24,6 +24,7 @@ interface ParkedTicket {
   id: string;
   items: POSCartItem[];
   customerName: string;
+  comment: string;
   parkedAt: string;
   total: number;
 }
@@ -64,6 +65,9 @@ export default function StandalonePOSPage() {
   // Parked tickets
   const [parkedTickets, setParkedTickets] = useState<ParkedTicket[]>([]);
   const [showParkedList, setShowParkedList] = useState(false);
+  const [parkModalOpen, setParkModalOpen] = useState(false);
+  const [parkName, setParkName] = useState('');
+  const [parkComment, setParkComment] = useState('');
 
   // Shift / Receipts data
   const [shiftData, setShiftData] = useState<any>(null);
@@ -132,17 +136,27 @@ export default function StandalonePOSPage() {
   }, []);
 
   // ─── TICKET PARKING ─────────────────────────────────
-  const parkCurrentTicket = () => {
+  const openParkModal = () => {
     if (cart.length === 0) return;
+    setParkName(customerName);
+    setParkComment('');
+    setParkModalOpen(true);
+  };
+
+  const confirmParkTicket = () => {
     const ticket: ParkedTicket = {
       id: Date.now().toString(),
       items: [...cart],
-      customerName: customerName || 'Sin nombre',
+      customerName: parkName.trim() || 'Sin nombre',
+      comment: parkComment.trim(),
       parkedAt: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
       total: cartTotal,
     };
     saveParkedToStorage([...parkedTickets, ticket]);
     clearCart();
+    setParkModalOpen(false);
+    setParkName('');
+    setParkComment('');
   };
 
   const restoreTicket = (ticketId: string) => {
@@ -717,8 +731,9 @@ export default function StandalonePOSPage() {
                       <span className="font-bold text-gray-800 text-sm">{t.customerName}</span>
                       <span className="text-xs text-gray-400">{t.parkedAt}</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-2">{t.items.length} items · {formatPrice(t.total)}</p>
-                    <div className="flex gap-2">
+                    <p className="text-xs text-gray-500">{t.items.length} items · {formatPrice(t.total)}</p>
+                    {t.comment && <p className="text-xs text-amber-600 italic mt-0.5">💬 {t.comment}</p>}
+                    <div className="flex gap-2 mt-2">
                       <button onClick={() => restoreTicket(t.id)} className="flex-1 px-3 py-1.5 bg-pink-500 text-white text-xs font-bold rounded-lg hover:bg-pink-600 transition-colors">
                         Restaurar
                       </button>
@@ -777,7 +792,7 @@ export default function StandalonePOSPage() {
             {/* PARK / SAVED BUTTON (1/3 width) */}
             <button
               onClick={() => {
-                if (cart.length > 0) { parkCurrentTicket(); }
+                if (cart.length > 0) { openParkModal(); }
                 else { setShowParkedList(!showParkedList); }
               }}
               className={`col-span-2 flex flex-col items-center justify-center gap-0.5 py-3 rounded-2xl font-black text-xs transition-all active:scale-95 ${
@@ -836,6 +851,43 @@ export default function StandalonePOSPage() {
             <div className="px-6 pb-6">
               <button onClick={() => setPaymentModalOpen(false)} disabled={processing}
                 className="w-full py-3 text-gray-500 hover:text-gray-700 font-bold text-sm transition-colors">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PARK TICKET MODAL ── */}
+      {parkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-amber-500 text-white px-6 py-5 text-center">
+              <Save className="w-10 h-10 mx-auto mb-2" />
+              <h3 className="text-xl font-black">Guardar Ticket</h3>
+              <p className="text-amber-100 text-sm mt-1">{cartItemCount} artículos · {formatPrice(cartTotal)}</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-black uppercase text-gray-500 tracking-widest mb-1.5 block">Nombre del cliente</label>
+                <input type="text" placeholder="Ej: Mesa 3, Juan..." value={parkName}
+                  onChange={(e) => setParkName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="text-xs font-black uppercase text-gray-500 tracking-widest mb-1.5 block">Comentario (opcional)</label>
+                <textarea placeholder="Ej: Esperando acompañante, pagar con transfer..." value={parkComment}
+                  onChange={(e) => setParkComment(e.target.value)} rows={3}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none" />
+              </div>
+
+              <button onClick={confirmParkTicket}
+                className="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-black text-base transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
+                <Save size={18} /> GUARDAR TICKET
+              </button>
+              <button onClick={() => setParkModalOpen(false)}
+                className="w-full py-2 text-gray-500 hover:text-gray-700 font-bold text-sm transition-colors">
                 Cancelar
               </button>
             </div>
