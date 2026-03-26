@@ -11,7 +11,8 @@ import {
   Printer, CheckCircle2, ReceiptText, ArrowLeft, ChevronDown, Store,
   Menu, XCircle, TrendingUp, Package, Settings, FileText,
   Bookmark, ChevronRight, Clock, DollarSign, Bluetooth, ChefHat,
-  UserCircle, AlertTriangle, RefreshCcw, Save, FolderOpen
+  UserCircle, AlertTriangle, RefreshCcw, Save, FolderOpen,
+  Pencil, Eye, EyeOff, ArrowUp, ArrowDown
 } from 'lucide-react';
 
 // ─── TYPES ─────────────────────────────────────────────
@@ -56,6 +57,7 @@ export default function StandalonePOSPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
+  const [editMode, setEditMode] = useState(false);
 
   // POS Layout customization (stored in localStorage)
   // hiddenProducts: Set of product IDs hidden from sales grid
@@ -395,45 +397,107 @@ export default function StandalonePOSPage() {
   //  RENDER VIEWS
   // ════════════════════════════════════════════════════════
 
-  const renderSalesView = () => (
-    <div className="flex-1 overflow-y-auto p-4">
-      {!selectedCategory ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {categories.map((cat) => {
-            const count = getProductCount(cat.id);
-            const emoji = catEmoji[cat.id] || '📦';
-            return (
-              <button key={cat.id} onClick={() => setSelectedCategory(cat.id)}
-                className="flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-gray-100 hover:border-pink-300 p-6 md:p-8 text-center transition-all active:scale-[0.95] shadow-sm hover:shadow-xl hover:shadow-pink-500/10 group">
-                <span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{emoji}</span>
-                <h3 className="font-black text-gray-900 text-base md:text-lg leading-tight mb-1">{cat.name}</h3>
-                <span className="text-xs font-bold text-gray-400">{count} productos</span>
+  const renderSalesView = () => {
+    // In edit mode, show ALL products (including hidden) so they can be toggled back on
+    const editProducts = selectedCategory
+      ? getOrderedProducts(selectedCategory)
+      : [];
+    const displayProducts = editMode ? editProducts : filteredProducts;
+
+    return (
+      <div className="flex-1 overflow-y-auto p-4">
+        {!selectedCategory ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            {categories.map((cat) => {
+              const count = getProductCount(cat.id);
+              const emoji = catEmoji[cat.id] || '📦';
+              return (
+                <button key={cat.id} onClick={() => setSelectedCategory(cat.id)}
+                  className="flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-gray-100 hover:border-pink-300 p-6 md:p-8 text-center transition-all active:scale-[0.95] shadow-sm hover:shadow-xl hover:shadow-pink-500/10 group">
+                  <span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{emoji}</span>
+                  <h3 className="font-black text-gray-900 text-base md:text-lg leading-tight mb-1">{cat.name}</h3>
+                  <span className="text-xs font-bold text-gray-400">{count} productos</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            {/* EDIT MODE TOGGLE */}
+            <div className="flex items-center justify-end mb-3 gap-2">
+              <button
+                onClick={() => setEditMode(!editMode)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95 ${
+                  editMode
+                    ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Pencil size={14} />
+                {editMode ? 'Listo' : 'Editar'}
               </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-          {filteredProducts.map((product) => {
-            const inCart = cart.find((i) => i.product.id === product.id);
-            return (
-              <button key={product.id} onClick={() => addToCart(product)}
-                className={`relative flex flex-col bg-white rounded-2xl border-2 p-3.5 text-left transition-all active:scale-[0.96] shadow-sm hover:shadow-md ${inCart ? 'border-pink-400 ring-2 ring-pink-100' : 'border-gray-100 hover:border-gray-200'}`}>
-                {inCart && (
-                  <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg z-10">{inCart.quantity}</span>
-                )}
-                <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">{product.name}</h3>
-                <span className="font-black text-pink-600 text-base mt-auto">{formatPrice(product.price)}</span>
-              </button>
-            );
-          })}
-          {filteredProducts.length === 0 && (
-            <div className="col-span-full text-center py-16 text-gray-400"><p className="font-bold text-lg">No hay productos</p></div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
+              {displayProducts.map((product, idx) => {
+                const inCart = cart.find((i) => i.product.id === product.id);
+                const isHidden = hiddenProducts.has(product.id);
+
+                if (editMode) {
+                  return (
+                    <div key={product.id}
+                      className={`relative flex flex-col bg-white rounded-2xl border-2 p-3 text-left transition-all shadow-sm ${
+                        isHidden ? 'opacity-40 border-gray-200 bg-gray-50' : 'border-gray-100'
+                      }`}>
+                      {/* Move arrows */}
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="flex gap-1">
+                          <button onClick={() => moveProduct(selectedCategory!, product.id, 'up')} disabled={idx === 0}
+                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
+                            <ArrowUp size={12} />
+                          </button>
+                          <button onClick={() => moveProduct(selectedCategory!, product.id, 'down')} disabled={idx === displayProducts.length - 1}
+                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-20 active:scale-90 transition-all">
+                            <ArrowDown size={12} />
+                          </button>
+                        </div>
+                        {/* Toggle visibility */}
+                        <button onClick={() => toggleProductVisibility(product.id)}
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
+                            isHidden
+                              ? 'bg-red-50 text-red-400 hover:bg-red-100'
+                              : 'bg-green-50 text-green-500 hover:bg-green-100'
+                          }`}>
+                          {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">{product.name}</h3>
+                      <span className="font-black text-pink-600 text-sm mt-auto">{formatPrice(product.price)}</span>
+                    </div>
+                  );
+                }
+
+                // Normal mode
+                return (
+                  <button key={product.id} onClick={() => addToCart(product)}
+                    className={`relative flex flex-col bg-white rounded-2xl border-2 p-3.5 text-left transition-all active:scale-[0.96] shadow-sm hover:shadow-md ${inCart ? 'border-pink-400 ring-2 ring-pink-100' : 'border-gray-100 hover:border-gray-200'}`}>
+                    {inCart && (
+                      <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg z-10">{inCart.quantity}</span>
+                    )}
+                    <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">{product.name}</h3>
+                    <span className="font-black text-pink-600 text-base mt-auto">{formatPrice(product.price)}</span>
+                  </button>
+                );
+              })}
+              {displayProducts.length === 0 && (
+                <div className="col-span-full text-center py-16 text-gray-400"><p className="font-bold text-lg">No hay productos</p></div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const renderShiftView = () => (
     <div className="flex-1 overflow-y-auto p-6">
