@@ -11,6 +11,7 @@ export default function Sidebar() {
 
   const mainNav = [
     { href: '/dashboard', label: 'Resumen del pedido' },
+    { href: '/dashboard/pos', label: '🖥️ Terminal POS' },
     { href: '/dashboard/delivery', label: 'Pedidos Delivery' },
     { href: '/dashboard/reports', label: 'Cierre de Ventas' },
     { href: '/dashboard/hours', label: 'Horarios de Atención' }
