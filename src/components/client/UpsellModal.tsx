@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { Product } from "@/types";
 import { products } from "@/lib/mock-db";
+import { supabase } from "@/lib/supabase";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Plus, Minus, ShoppingBag } from "lucide-react";
+import { Plus, Minus, ShoppingBag, Loader2 } from "lucide-react";
 
 interface AddonState {
   product: Product;
   quantity: number;
+  categoryName: string;
 }
 
 interface UpsellModalProps {
@@ -18,44 +20,57 @@ interface UpsellModalProps {
 
 export function UpsellModal({ product, isOpen, onOpenChange, onConfirm }: UpsellModalProps) {
   const [addons, setAddons] = useState<AddonState[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      // Load specific grouped products by ID from DB
-      const arrolladoJQ = products.find(p => p.id === 'p2_1');
-      const arrolladoP = products.find(p => p.id === 'p2_2');
-      const fries = products.find(p => p.id === 'p2_3'); 
-      
-      const aguaSG = products.find(p => p.id === 'p8_3_sg');
-      const aguaCG = products.find(p => p.id === 'p8_3_cg');
-
-      const drink220Coca = products.find(p => p.id === 'p8_2_coca');
-      const drink220Zero = products.find(p => p.id === 'p8_2_zero');
-      const drink220Fanta = products.find(p => p.id === 'p8_2_fanta');
-      const drink220Sprite = products.find(p => p.id === 'p8_2_sprite');
-
-      const drink350Coca = products.find(p => p.id === 'p8_4_coca');
-      const drink350Zero = products.find(p => p.id === 'p8_4_zero');
-      const drink350Fanta = products.find(p => p.id === 'p8_4_fanta');
-      const drink350Sprite = products.find(p => p.id === 'p8_4_sprite');
-      const drink350Inka = products.find(p => p.id === 'p8_4_inka');
-
-      const soy = products.find(p => p.id === 'p9_1');   
-      const teriyaki = products.find(p => p.id === 'p9_2'); 
-      const lactonesa = products.find(p => p.id === 'p9_3'); 
-      const bbq = products.find(p => p.id === 'p9_4');       
-
-      const availableProducts = [
-        arrolladoJQ, arrolladoP, fries, 
-        aguaSG, aguaCG,
-        drink220Coca, drink220Zero, drink220Fanta, drink220Sprite,
-        drink350Coca, drink350Zero, drink350Fanta, drink350Sprite, drink350Inka, 
-        soy, teriyaki, lactonesa, bbq
-      ].filter(Boolean) as Product[];
-
-      setAddons(availableProducts.map(p => ({ product: p, quantity: 0 })));
+      loadUpsells();
     }
   }, [isOpen]);
+
+  const loadUpsells = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('upsells')
+      .select('*')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+
+    if (!error && data && data.length > 0) {
+      const addonItems: AddonState[] = data
+        .map((row: any) => {
+          const p = products.find((prod) => prod.id === row.product_id);
+          if (!p) return null;
+          return { product: p, quantity: 0, categoryName: row.category_name };
+        })
+        .filter(Boolean) as AddonState[];
+
+      setAddons(addonItems);
+    } else {
+      // Fallback: if no upsells configured in DB, use legacy hardcoded list
+      const fallbackIds = [
+        'p2_1', 'p2_2', 'p2_3',
+        'p8_3_sg', 'p8_3_cg',
+        'p8_2_coca', 'p8_2_zero', 'p8_2_fanta', 'p8_2_sprite',
+        'p8_4_coca', 'p8_4_zero', 'p8_4_fanta', 'p8_4_sprite', 'p8_4_inka',
+        'p9_1', 'p9_2', 'p9_3', 'p9_4'
+      ];
+      const fallbackProducts = fallbackIds
+        .map((id) => products.find((p) => p.id === id))
+        .filter(Boolean) as Product[];
+
+      setAddons(fallbackProducts.map((p) => {
+        let cat = 'Otros';
+        if (p.id.startsWith('p2_')) cat = 'Para Acompañar';
+        else if (p.id.startsWith('p8_3')) cat = 'Aguas';
+        else if (p.id.startsWith('p8_2')) cat = 'Bebidas Mini (220cc)';
+        else if (p.id.startsWith('p8_4')) cat = 'Bebidas Normales (350cc)';
+        else if (p.id.startsWith('p9_')) cat = 'Salsas Extras';
+        return { product: p, quantity: 0, categoryName: cat };
+      }));
+    }
+    setLoading(false);
+  };
 
   if (!product) return null;
 
@@ -80,11 +95,8 @@ export function UpsellModal({ product, isOpen, onOpenChange, onConfirm }: Upsell
     return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(price);
   };
 
-  const addonAccompaniments = addons.filter(a => a.product.id.startsWith('p2_'));
-  const addonAguas = addons.filter(a => a.product.id.startsWith('p8_3_'));
-  const addonDrinks220 = addons.filter(a => a.product.id.startsWith('p8_2_'));
-  const addonDrinks350 = addons.filter(a => a.product.id.startsWith('p8_4_'));
-  const addonSauces = addons.filter(a => a.product.id.startsWith('p9_'));
+  // Dynamic grouping by categoryName
+  const categoryNames = [...new Set(addons.map((a) => a.categoryName))];
 
   const renderAddonGroup = (title: string, items: AddonState[]) => {
     if (items.length === 0) return null;
@@ -135,17 +147,30 @@ export function UpsellModal({ product, isOpen, onOpenChange, onConfirm }: Upsell
         </div>
 
         <div className="p-4 sm:p-6 overflow-y-auto max-h-[80vh] md:max-h-[70vh] bg-white custom-scrollbar w-full">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 items-start">
-            <div className="flex flex-col">
-              {renderAddonGroup('Para Acompañar', addonAccompaniments)}
-              {renderAddonGroup('Bebidas Mini (220cc)', addonDrinks220)}
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
             </div>
-            <div className="flex flex-col">
-              {renderAddonGroup('Bebidas Normales (350cc)', addonDrinks350)}
-              {renderAddonGroup('Aguas', addonAguas)}
-              {renderAddonGroup('Salsas Extras', addonSauces)}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 items-start">
+              {/* Split categories into two columns */}
+              {(() => {
+                const half = Math.ceil(categoryNames.length / 2);
+                const leftCats = categoryNames.slice(0, half);
+                const rightCats = categoryNames.slice(half);
+                return (
+                  <>
+                    <div className="flex flex-col">
+                      {leftCats.map((cat) => renderAddonGroup(cat, addons.filter((a) => a.categoryName === cat)))}
+                    </div>
+                    <div className="flex flex-col">
+                      {rightCats.map((cat) => renderAddonGroup(cat, addons.filter((a) => a.categoryName === cat)))}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
-          </div>
+          )}
         </div>
 
         <div className="p-4 sm:p-5 border-t border-gray-100 bg-white flex flex-col sm:flex-row sm:justify-between items-center gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] z-10 shrink-0">

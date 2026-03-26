@@ -17,6 +17,7 @@ export default function Sidebar() {
   ];
 
   const bottomNav = [
+    { href: '/dashboard/upsells', label: 'Extras / Upsells' },
     { href: '/dashboard/zones', label: 'Zonas de Delivery' },
     { href: '/dashboard/settings', label: 'Impresoras' },
     { href: '/tutorial', label: 'Tutorial' },
