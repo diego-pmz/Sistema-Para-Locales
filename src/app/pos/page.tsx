@@ -4,11 +4,11 @@ import { useState, useCallback } from 'react';
 import { categories, products } from '@/lib/mock-db';
 import { Product } from '@/types';
 import { supabase } from '@/lib/supabase';
-import { useAdminStore } from '@/lib/store';
 import { ESCPOSPrinter } from '@/lib/printer';
+import Link from 'next/link';
 import { 
   ShoppingCart, Trash2, Plus, Minus, X, Banknote, CreditCard, 
-  Printer, CheckCircle2, ReceiptText, AlertTriangle 
+  Printer, CheckCircle2, ReceiptText, ArrowLeft, ChevronDown, Store
 } from 'lucide-react';
 
 interface POSCartItem {
@@ -16,15 +16,17 @@ interface POSCartItem {
   quantity: number;
 }
 
-export default function POSPage() {
-  const { activeBranch } = useAdminStore();
+const BRANCHES = ['Pucón', 'Villarrica', 'Temuco', 'Panguipulli'];
+
+export default function StandalonePOSPage() {
+  const [activeBranch, setActiveBranch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(categories[0]?.id || '');
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [processing, setProcessing] = useState(false);
   const [lastSaleTotal, setLastSaleTotal] = useState<number | null>(null);
   const [customerName, setCustomerName] = useState('');
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
 
-  // Filter products by selected category (only available ones)
   const filteredProducts = products.filter(
     (p) => p.categoryId === selectedCategory && p.isAvailable
   );
@@ -77,7 +79,6 @@ export default function POSPage() {
     setProcessing(true);
 
     try {
-      // Build order items (same format as online orders for compatibility)
       const orderItems = cart.map((item) => ({
         id: item.product.id,
         name: item.product.name,
@@ -86,7 +87,6 @@ export default function POSPage() {
         imageUrl: item.product.imageUrl,
       }));
 
-      // Add payment metadata
       orderItems.push({
         id: '_payment',
         name: '_payment',
@@ -98,7 +98,6 @@ export default function POSPage() {
         isPaidOnline: method === 'card',
       } as any);
 
-      // Calculate max prepTime
       const maxPrepTime = Math.max(...cart.map((i) => i.product.prepTime || 0), 5);
 
       const orderPayload = {
@@ -106,36 +105,27 @@ export default function POSPage() {
         branch_name: activeBranch,
         items: orderItems,
         total: cartTotal,
-        status: 'delivered', // POS sales = delivered instantly
+        status: 'delivered',
         notes: `[POS] Pago: ${method === 'cash' ? 'Efectivo' : 'Tarjeta'}`,
         estimated_wait_time: maxPrepTime,
         created_at: new Date().toISOString(),
       };
 
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
-
       if (error) throw error;
 
-      // Try to print if printers are connected
+      // Auto-print
       if (data) {
         try {
-          if (ESCPOSPrinter.isConnected('kitchen')) {
-            await ESCPOSPrinter.printOrder(data, 'kitchen');
-          }
+          if (ESCPOSPrinter.isConnected('kitchen')) await ESCPOSPrinter.printOrder(data, 'kitchen');
         } catch (e) { console.warn('Kitchen print failed:', e); }
-
         try {
-          if (ESCPOSPrinter.isConnected('cashier')) {
-            await ESCPOSPrinter.printOrder(data, 'cashier');
-          }
+          if (ESCPOSPrinter.isConnected('cashier')) await ESCPOSPrinter.printOrder(data, 'cashier');
         } catch (e) { console.warn('Cashier print failed:', e); }
       }
 
-      // Success
       setLastSaleTotal(cartTotal);
       clearCart();
-
-      // Clear success message after 3s
       setTimeout(() => setLastSaleTotal(null), 3000);
     } catch (err: any) {
       alert('Error al procesar la venta: ' + err.message);
@@ -144,68 +134,131 @@ export default function POSPage() {
     }
   };
 
-  // --- BLOCKED STATE ---
+  // --- BRANCH SELECTION SCREEN ---
   if (!activeBranch) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-10">
-        <ReceiptText className="w-20 h-20 text-gray-200 mb-6" />
-        <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tight">Terminal POS</h2>
-        <p className="text-gray-500 font-medium max-w-md mx-auto text-lg leading-relaxed">
-          Selecciona una sucursal en el menú lateral para comenzar a vender.
-        </p>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center">
+          <div className="w-20 h-20 bg-pink-500 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-pink-500/40">
+            <span className="text-white font-black text-5xl italic">C</span>
+          </div>
+          <h1 className="text-4xl font-black text-white mb-2 tracking-tight">Terminal POS</h1>
+          <p className="text-gray-400 font-medium mb-10">Clásicos Sushi & Street Food</p>
+          
+          <p className="text-gray-500 text-sm font-bold uppercase tracking-widest mb-4">Selecciona tu sucursal</p>
+          <div className="grid grid-cols-2 gap-3">
+            {BRANCHES.map((branch) => (
+              <button
+                key={branch}
+                onClick={() => setActiveBranch(branch)}
+                className="py-5 px-6 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-pink-500/50 rounded-2xl text-white font-bold text-lg transition-all active:scale-95 hover:shadow-lg hover:shadow-pink-500/10"
+              >
+                {branch}
+              </button>
+            ))}
+          </div>
+
+          <Link href="/dashboard" className="inline-flex items-center gap-2 mt-10 text-gray-500 hover:text-gray-300 font-medium transition-colors text-sm">
+            <ArrowLeft size={16} /> Volver al Dashboard
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-gray-100">
+    <div className="flex h-screen overflow-hidden bg-gray-100">
       {/* ============================================ */}
-      {/* LEFT: CATEGORIES + PRODUCTS */}
+      {/* LEFT: CATEGORIES + PRODUCTS (FULL WIDTH) */}
       {/* ============================================ */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* CATEGORY TABS */}
-        <div className="bg-white border-b border-gray-200 px-3 py-2 flex gap-2 overflow-x-auto shrink-0 shadow-sm">
-          {categories.map((cat) => (
+        {/* TOP BAR */}
+        <div className="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center gap-3 shrink-0 shadow-sm">
+          {/* Branch Selector */}
+          <div className="relative">
             <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${
-                selectedCategory === cat.id
-                  ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/30'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              onClick={() => setShowBranchMenu(!showBranchMenu)}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-xl font-bold text-sm"
             >
-              {cat.name}
+              <Store size={16} />
+              {activeBranch}
+              <ChevronDown size={14} />
             </button>
-          ))}
+            {showBranchMenu && (
+              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[160px]">
+                {BRANCHES.map((b) => (
+                  <button
+                    key={b}
+                    onClick={() => { setActiveBranch(b); setShowBranchMenu(false); }}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-bold transition-colors ${
+                      b === activeBranch ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Category Tabs */}
+          <div className="flex-1 flex gap-2 overflow-x-auto pl-2">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${
+                  selectedCategory === cat.id
+                    ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/30'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Printer indicator */}
+          {(ESCPOSPrinter.isConnected('kitchen') || ESCPOSPrinter.isConnected('cashier')) && (
+            <div className="flex items-center gap-1.5 text-xs text-green-600 font-bold bg-green-50 px-3 py-1.5 rounded-full shrink-0">
+              <Printer size={12} /> Impresora
+            </div>
+          )}
+
+          {/* Back to Dashboard */}
+          <Link
+            href="/dashboard"
+            className="text-gray-400 hover:text-gray-600 transition-colors shrink-0 p-2"
+            title="Volver al Dashboard"
+          >
+            <ArrowLeft size={18} />
+          </Link>
         </div>
 
         {/* PRODUCT GRID */}
         <div className="flex-1 overflow-y-auto p-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
             {filteredProducts.map((product) => {
               const inCart = cart.find((i) => i.product.id === product.id);
               return (
                 <button
                   key={product.id}
                   onClick={() => addToCart(product)}
-                  className={`relative flex flex-col bg-white rounded-2xl border-2 p-4 text-left transition-all active:scale-[0.97] shadow-sm hover:shadow-md ${
+                  className={`relative flex flex-col bg-white rounded-2xl border-2 p-3.5 text-left transition-all active:scale-[0.96] shadow-sm hover:shadow-md ${
                     inCart
                       ? 'border-pink-400 ring-2 ring-pink-100'
                       : 'border-gray-100 hover:border-gray-200'
                   }`}
                 >
-                  {/* Badge if in cart */}
                   {inCart && (
-                    <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg">
+                    <span className="absolute -top-2 -right-2 w-7 h-7 bg-pink-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg z-10">
                       {inCart.quantity}
                     </span>
                   )}
-
-                  <h3 className="font-bold text-gray-900 text-[13px] leading-tight mb-2 line-clamp-2 min-h-[36px]">
+                  <h3 className="font-bold text-gray-900 text-[12px] leading-tight mb-2 line-clamp-2 min-h-[32px]">
                     {product.name}
                   </h3>
-                  <span className="font-black text-pink-600 text-lg mt-auto">
+                  <span className="font-black text-pink-600 text-base mt-auto">
                     {formatPrice(product.price)}
                   </span>
                 </button>
@@ -224,31 +277,27 @@ export default function POSPage() {
       {/* ============================================ */}
       {/* RIGHT: TICKET / CART SIDEBAR */}
       {/* ============================================ */}
-      <div className="w-[340px] lg:w-[380px] bg-white border-l border-gray-200 flex flex-col shrink-0 shadow-lg">
+      <div className="w-[320px] lg:w-[360px] bg-white border-l border-gray-200 flex flex-col shrink-0 shadow-xl">
         {/* HEADER */}
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-900 text-white">
           <div className="flex items-center gap-2">
-            <ShoppingCart className="text-pink-500" size={20} />
-            <h2 className="font-black text-gray-900 text-lg tracking-tight">Ticket</h2>
+            <ReceiptText size={18} />
+            <h2 className="font-black text-base tracking-tight">TICKET</h2>
             {cartItemCount > 0 && (
-              <span className="bg-pink-100 text-pink-600 text-xs font-black px-2.5 py-0.5 rounded-full">
+              <span className="bg-pink-500 text-white text-xs font-black px-2 py-0.5 rounded-full">
                 {cartItemCount}
               </span>
             )}
           </div>
           {cart.length > 0 && (
-            <button
-              onClick={clearCart}
-              className="text-gray-400 hover:text-red-500 transition-colors p-1"
-              title="Limpiar todo"
-            >
-              <Trash2 size={18} />
+            <button onClick={clearCart} className="text-gray-400 hover:text-red-400 transition-colors p-1">
+              <Trash2 size={16} />
             </button>
           )}
         </div>
 
         {/* CUSTOMER NAME */}
-        <div className="px-5 py-2 border-b border-gray-50 shrink-0">
+        <div className="px-4 py-2 border-b border-gray-50 shrink-0">
           <input
             type="text"
             placeholder="Nombre del cliente (opcional)"
@@ -259,53 +308,50 @@ export default function POSPage() {
         </div>
 
         {/* CART ITEMS */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="flex-1 overflow-y-auto px-3 py-2">
           {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
-              <ReceiptText className="w-16 h-16 text-gray-200 mb-4" />
-              <p className="font-bold">Ticket vacío</p>
-              <p className="text-sm mt-1">Toca un producto para agregarlo</p>
+              <ShoppingCart className="w-14 h-14 text-gray-200 mb-3" />
+              <p className="font-bold text-sm">Ticket vacío</p>
+              <p className="text-xs mt-1">Toca un producto para agregarlo</p>
             </div>
           ) : (
-            <div className="space-y-1">
-              {cart.map((item) => (
+            <div className="space-y-0.5">
+              {cart.map((item, idx) => (
                 <div
                   key={item.product.id}
-                  className="flex items-center gap-2 py-2.5 px-3 rounded-xl hover:bg-gray-50 transition-colors group"
+                  className="flex items-center gap-2 py-2 px-2 rounded-xl hover:bg-gray-50 transition-colors group"
                 >
+                  <span className="text-gray-300 text-xs font-mono w-4 shrink-0">{idx + 1}</span>
+                  
                   {/* QTY CONTROLS */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-0.5 shrink-0">
                     <button
                       onClick={() => updateQuantity(item.product.id, -1)}
-                      className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 active:scale-90 transition-all"
+                      className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 active:scale-90 transition-all"
                     >
-                      <Minus size={14} strokeWidth={3} />
+                      <Minus size={12} strokeWidth={3} />
                     </button>
-                    <span className="w-7 text-center font-black text-sm">{item.quantity}</span>
+                    <span className="w-6 text-center font-black text-xs">{item.quantity}</span>
                     <button
                       onClick={() => updateQuantity(item.product.id, 1)}
-                      className="w-7 h-7 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600 hover:bg-pink-500 hover:text-white active:scale-90 transition-all"
+                      className="w-6 h-6 rounded-md bg-pink-50 flex items-center justify-center text-pink-600 hover:bg-pink-500 hover:text-white active:scale-90 transition-all"
                     >
-                      <Plus size={14} strokeWidth={3} />
+                      <Plus size={12} strokeWidth={3} />
                     </button>
                   </div>
 
-                  {/* NAME */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-800 text-[13px] truncate">{item.product.name}</p>
-                  </div>
+                  <p className="flex-1 font-bold text-gray-800 text-[12px] truncate min-w-0">{item.product.name}</p>
 
-                  {/* SUBTOTAL */}
-                  <span className="font-black text-gray-900 text-sm shrink-0">
+                  <span className="font-black text-gray-900 text-xs shrink-0">
                     {formatPrice(item.product.price * item.quantity)}
                   </span>
 
-                  {/* DELETE */}
                   <button
                     onClick={() => removeFromCart(item.product.id)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all ml-1"
+                    className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"
                   >
-                    <X size={14} />
+                    <X size={12} />
                   </button>
                 </div>
               ))}
@@ -315,8 +361,8 @@ export default function POSPage() {
 
         {/* SUCCESS MESSAGE */}
         {lastSaleTotal !== null && (
-          <div className="mx-4 mb-2 p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 animate-in slide-in-from-bottom duration-300">
-            <CheckCircle2 className="text-green-500 shrink-0" size={20} />
+          <div className="mx-3 mb-2 p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 animate-in slide-in-from-bottom duration-300">
+            <CheckCircle2 className="text-green-500 shrink-0" size={18} />
             <div>
               <p className="text-green-800 font-black text-sm">¡Venta Registrada!</p>
               <p className="text-green-600 text-xs font-bold">{formatPrice(lastSaleTotal)}</p>
@@ -324,36 +370,20 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* PRINTER STATUS */}
-        {(ESCPOSPrinter.isConnected('kitchen') || ESCPOSPrinter.isConnected('cashier')) && (
-          <div className="mx-4 mb-2 flex items-center gap-2 text-xs text-gray-400 font-bold">
-            <Printer size={12} />
-            <span>
-              {ESCPOSPrinter.isConnected('kitchen') && ESCPOSPrinter.isConnected('cashier')
-                ? 'Cocina + Cajero conectados'
-                : ESCPOSPrinter.isConnected('kitchen')
-                ? 'Cocina conectada'
-                : 'Cajero conectado'}
-            </span>
-          </div>
-        )}
-
         {/* TOTAL + PAYMENT BUTTONS */}
-        <div className="border-t border-gray-100 p-4 space-y-3 shrink-0 bg-gray-50/50">
-          {/* TOTAL */}
+        <div className="border-t-2 border-gray-900 p-4 space-y-3 shrink-0 bg-gray-50/80">
           <div className="flex items-center justify-between px-1">
             <span className="text-gray-500 font-bold text-sm uppercase tracking-widest">Total</span>
             <span className="text-3xl font-black text-gray-900">{formatPrice(cartTotal)}</span>
           </div>
 
-          {/* PAYMENT BUTTONS */}
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => handlePayment('cash')}
               disabled={cart.length === 0 || processing}
               className="flex flex-col items-center justify-center gap-1 py-4 rounded-2xl bg-green-500 hover:bg-green-600 active:scale-95 text-white font-black text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-green-500/30"
             >
-              <Banknote size={24} />
+              <Banknote size={22} />
               <span>EFECTIVO</span>
             </button>
             <button
@@ -361,7 +391,7 @@ export default function POSPage() {
               disabled={cart.length === 0 || processing}
               className="flex flex-col items-center justify-center gap-1 py-4 rounded-2xl bg-blue-500 hover:bg-blue-600 active:scale-95 text-white font-black text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
             >
-              <CreditCard size={24} />
+              <CreditCard size={22} />
               <span>TARJETA</span>
             </button>
           </div>
